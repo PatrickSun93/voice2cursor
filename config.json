@@ -1,0 +1,20 @@
+{
+  "hotkey": "alt_r",
+  "model": "mlx-community/whisper-large-v3-turbo",
+  "language": null,
+  "initial_prompt": null,
+  "min_seconds": 0.35,
+  "max_seconds": 300,
+  "preload_model": true,
+  "auto_paste": true,
+  "sounds": true,
+  "save_recordings": true,
+  "recordings_dir": "~/.voice2cursor/recordings",
+  "ollama": {
+    "enabled": false,
+    "url": "http://localhost:11434/api/generate",
+    "model": "qwen2.5:3b",
+    "timeout": 15
+  },
+  "condition_on_previous_text": false
+}
