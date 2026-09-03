@@ -1,18 +1,34 @@
-# SonicType
+# voice2cursor
 
-Offline push-to-talk dictation for Windows. Hold a hotkey, speak, release — the
-text appears at your cursor. Transcription runs locally on your GPU via
-[faster-whisper](https://github.com/SYSTRAN/faster-whisper); an optional pass
-through a local [Ollama](https://ollama.com) model cleans up the transcript.
+Offline push-to-talk dictation for **macOS and Windows**. Hold a hotkey, speak,
+release — the text appears at your cursor. Transcription runs locally on your
+GPU; an optional pass through a local [Ollama](https://ollama.com) model cleans
+up the transcript.
 
 No web UI, no cloud, no audio leaves the machine.
 
 ```
-  hold Ctrl+Shift+Space  ──▶  mic  ──▶  faster-whisper (CUDA)  ──▶  paste at cursor
-                                                     │
-                                             (optional) Ollama
-                                              punctuation, filler removal
+  hold the hotkey  ──▶  mic  ──▶  Whisper (local GPU)  ──▶  paste at cursor
+                                          │
+                                  (optional) Ollama
+                                   punctuation, filler removal
 ```
+
+One package serves both hosts. Everything that differs is behind
+`voice2cursor/backends/` and `voice2cursor/engines/`, so no other module asks
+what platform it is on.
+
+| | macOS | Windows |
+|---|---|---|
+| engine | [mlx-whisper](https://github.com/ml-explore/mlx-examples) (Apple Silicon GPU) | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CUDA) |
+| backend | `backends/macos.py` | `backends/windows.py` |
+| default hotkey | right Option (`alt_r`) | `ctrl+alt+space` |
+| paste | Cmd+V | Ctrl+V |
+| clipboard | `pbcopy` / `pbpaste` | pyperclip |
+| runs as | headless launchd agent | tray icon |
+| state | `~/.voice2cursor` | `%APPDATA%\voice2cursor` |
+| autostart | LaunchAgent (`scripts/macos/install.sh`) | Startup shortcut (`scripts/windows/install-autostart.ps1`) |
+| setup | `scripts/macos/install.sh` | `scripts/windows/setup.ps1` |
 
 ## Why it is built this way
 
@@ -31,7 +47,27 @@ which silently ate the first word of every clip. So the stream is held open and
 audio flows into a ring buffer; the hotkey just marks where to start reading.
 That also buys a 0.25 s pre-roll, so speaking a fraction early still works.
 While idle the buffer holds only the pre-roll, about 15 KB. The cost is that
-Windows shows the microphone-in-use indicator whenever SonicType is running.
+Windows shows the microphone-in-use indicator whenever voice2cursor is running.
+
+**Two engines, not one.** mlx-whisper runs on the Apple Silicon GPU and
+faster-whisper on CUDA. Each one falls back to a slow CPU path on the other's
+hardware, so picking a single engine would have made one of the two platforms
+noticeably worse. `engines/` gives them one interface; `config.engine` is
+`auto` by default and takes the host's preferred engine, falling back to the
+other if it is not installed.
+
+They disagree about more than speed. faster-whisper reports `no_speech_prob`
+and `avg_logprob` per segment, which is what lets the transcript filter throw
+away the stock phrases Whisper invents from near-silence ("Thank you.",
+"Mahala"). An engine that reports neither returns `None`, which means *unknown*
+and is treated as keep — discarding real speech is the worse failure.
+
+**Tray on Windows, headless on macOS.** These are different program shapes, not
+one with a flag: pystray wants its own loop and Tk wants the main thread, while
+a launchd agent has no session to draw a menu-bar item in and would need an
+`.app` bundle to try. Both drive the same recorder, transcriber and delivery
+path; only the shell around them differs. `--tray` and `--headless` override
+the default on either host.
 
 **The CUDA DLLs need help.** CTranslate2 links cuBLAS and cuDNN dynamically,
 and the pip wheels put them somewhere Windows does not search. `cuda_setup.py`
@@ -40,75 +76,109 @@ it you get `Library cudnn64_9.dll is not found` and a silent drop to CPU.
 
 ## Setup
 
-Requires an existing conda (miniconda is fine) and, for the polish step,
-Ollama. Everything else the setup script installs into an isolated env.
+### macOS
+
+Apple Silicon. Needs `python3` (the system one is fine) and, for the
+transcript, about 1.6 GB of model download on first run.
+
+```bash
+git clone https://github.com/PatrickSun93/voice2cursor.git
+cd voice2cursor
+./scripts/macos/install.sh
+```
+
+That builds `.venv` with `--copies`, installs from `requirements.txt` (the
+platform markers pick the mlx side), downloads the model, and writes a launchd
+agent plus its wrapper into `~/.voice2cursor/`.
+
+Then grant permissions — this is the step that actually catches people out.
+macOS grants Accessibility and Input Monitoring **per executable**, and the
+executable is the venv's python, not Terminal:
+
+> System Settings → Privacy & Security → **Accessibility** *and* **Input
+> Monitoring** → add `<repo>/.venv/bin/python3` to both.
+
+Until both are granted the hotkey never fires and the paste silently does
+nothing, with no error printed anywhere. `--doctor` checks it for you.
+
+```bash
+./scripts/macos/start.sh     # load the agent
+./scripts/macos/stop.sh      # unload it
+./scripts/macos/uninstall.sh # remove the agent; keeps recordings and config
+```
+
+The plist deliberately contains no `/Volumes` path: launchd kills a job with
+`EX_CONFIG` if it finds one, so the plist points at `~/.voice2cursor/run.sh`
+and the wrapper walks into the repo.
+
+### Windows
+
+NVIDIA GPU recommended; it runs on CPU without one, slower.
 
 ```powershell
-cd C:\FlowDev\githubdevitems\sonictype
-.\setup.ps1
+git clone https://github.com/PatrickSun93/voice2cursor.git
+cd voice2cursor
+powershell -ExecutionPolicy Bypass -File scripts\windows\setup.ps1
 ```
 
-This creates the `sonictype` conda env from `environment.yml`, then verifies
-Python, CUDA visibility, and microphone enumeration. It is safe to re-run.
+This creates the `voice2cursor` conda env from `environment.yml`, then verifies
+the three things that actually break on a fresh machine: the interpreter, CUDA
+visibility through the pip-installed NVIDIA DLLs, and a usable input device.
 
-### If PowerShell is blocked
+#### If PowerShell is blocked
 
-Some managed machines ban PowerShell by policy, which makes every `.ps1` here
-unrunnable. `cscript`/`wscript` are not usually restricted, so there is a
-parallel set of entry points that avoid PowerShell entirely:
-
-| PowerShell | PowerShell-free equivalent |
-| --- | --- |
-| `.\setup.ps1` | double-click `setup.vbs`, or `cscript //nologo setup.vbs` |
-| `.\install-autostart.ps1` | `cscript //nologo install-autostart.vbs` |
-| `.\install-autostart.ps1 -Remove` | `cscript //nologo install-autostart.vbs /remove` |
-| `.\run.ps1` | `%LOCALAPPDATA%\miniconda3\envs\sonictype\python.exe -m sonictype` |
-
-`setup.vbs` is only a launcher for `setup.py`, which holds the real logic and
-can be run directly with conda's **base** interpreter — not the `sonictype` env
-(it may not exist yet) and never a bare `python`, which on some machines
-resolves to a stale `C:\Python34`:
-
-```
-%LOCALAPPDATA%\miniconda3\python.exe setup.py
-%LOCALAPPDATA%\miniconda3\python.exe setup.py --verify-only   # checks only, no conda solve
-```
-
-`--verify-only` re-runs the interpreter, CUDA, microphone, and Ollama checks
-without touching the env — the fastest way to confirm a working install.
-
-For the optional polish step:
-
-```powershell
-ollama pull llama3.2:3b
-```
-
-`llama3.2:3b` is a good default — about 2 GB, fast, and more than capable of
-punctuating dictation. `qwen2.5:7b` is noticeably better at rewriting if you
-would rather spend the VRAM.
+Double-click `scripts\windows\setup.vbs`, which finds conda's base
+interpreter and runs `setup.py` — the same work, no PowerShell involved.
 
 ## Running
 
+Naming no options picks this host's usual shape — headless on macOS, tray on
+Windows — and either can be forced:
+
+```
+python -m voice2cursor              # this host's default
+python -m voice2cursor --headless   # no tray, logs to a file
+python -m voice2cursor --tray       # tray icon (needs pystray + pillow)
+python -m voice2cursor --doctor     # diagnostics, then exit
+python -m voice2cursor --config     # print the config path
+python -m voice2cursor --list-devices
+```
+
+A second copy refuses to start, because two listeners means every hotkey press
+fires twice — which is exactly what happens when a debug run joins the
+autostarted one. `--allow-multiple` overrides it.
+
+### macOS
+
+```bash
+./scripts/macos/start.sh    # load the launchd agent
+./scripts/macos/stop.sh     # unload it
+tail -f ~/.voice2cursor/logs/voice2cursor.log
+./.venv/bin/python3 -m voice2cursor --headless   # or in the foreground
+```
+
+### Windows
+
 ```powershell
-.\run.ps1              # with a console, so you can see logs and tracebacks
+.\scripts\windows\run.ps1          # with a console, so you can see logs
 ```
 
-Double-click `run-silent.vbs` to start it with no console window. To have it
-start at login:
+Double-click `scripts\windows\run-silent.vbs` to start it with no console
+window. To have it start at login:
 
 ```powershell
-.\install-autostart.ps1            # add
-.\install-autostart.ps1 -Remove    # remove
+.\scripts\windows\install-autostart.ps1            # add
+.\scripts\windows\install-autostart.ps1 -Remove    # remove
 ```
 
-Or, without PowerShell — same shortcut, same target, and equally safe to re-run:
+Or, without PowerShell — same shortcut, same target, equally safe to re-run:
 
 ```
-cscript //nologo install-autostart.vbs           # add
-cscript //nologo install-autostart.vbs /remove   # remove
+cscript //nologo scripts\windows\install-autostart.vbs           # add
+cscript //nologo scripts\windows\install-autostart.vbs /remove   # remove
 ```
 
-Both write `SonicType.lnk` into the per-user Startup folder pointing at
+Both write `voice2cursor.lnk` into the per-user Startup folder pointing at
 `wscript.exe "run-silent.vbs"`. No admin rights, no registry.
 
 A microphone icon appears in the system tray. Its colour is the status:
@@ -124,19 +194,25 @@ A microphone icon appears in the system tray. Its colour is the status:
 
 | Hotkey | Action |
 | --- | --- |
-| `Ctrl+Shift+Space` | Hold to record, release to transcribe and paste |
+| right Option (macOS) / `Ctrl+Shift+Space` (Windows) | Hold to record, release to transcribe and paste |
 | `Ctrl+Alt+P` | Polish the last transcript with Ollama and paste the result |
 | `Ctrl+Alt+R` | Open the transcript window (raw beside polished) |
 
 Prefer tapping to holding? Tray menu → **Hotkey mode** → *Tap to start, tap to
-stop*. Clips shorter than 0.25 s are discarded, so a stray tap costs nothing.
+stop*. Clips shorter than `min_seconds` (0.35 s) are discarded, so a stray tap costs nothing.
 
-The record key is `Ctrl+Shift+Space`, not the more obvious `Ctrl+Alt+Space`,
+On macOS the record key is the **right Option key** alone. A lone modifier is
+the gesture push-to-talk actually wants, and the left Option key is untouched
+so it can still type special characters — the two are told apart, which is why
+`alt_r` in a config means right Option specifically while a bare `alt` means
+either.
+
+On Windows it is `Ctrl+Shift+Space`, not the more obvious `Ctrl+Alt+Space`,
 because the **Claude desktop app already owns that one**. To find a combination
 nothing else has claimed:
 
 ```powershell
-.\run.ps1 --scan-hotkeys
+.\scripts\windows\run.ps1 --scan-hotkeys
 ```
 
 It checks your three configured hotkeys plus a list of candidates and reports
@@ -173,8 +249,17 @@ Buttons polish, copy either side, or paste the polished text at your cursor.
 
 ## Configuration
 
-Settings live in `%APPDATA%\SonicType\config.json`, written whenever you change
-something in the tray menu. A few options are only reachable by editing it:
+Settings live in the state directory — `~/.voice2cursor/config.json` on macOS,
+`%APPDATA%\voice2cursor\config.json` on Windows — written whenever you change
+something in the tray menu.
+
+Settings from either pre-merge build are migrated the first time you run this
+one: the Windows package's `%APPDATA%\SonicType\config.json` is copied across
+with its vocabulary file, and the macOS script's `config.json` is translated
+key by key (`hotkey` → `record_hotkey`, `auto_paste: false` → `output_mode:
+"clipboard"`, the nested `ollama` block flattened). Nothing is deleted.
+
+A few options are only reachable by editing the file:
 
 | Key | Notes |
 | --- | --- |
@@ -186,7 +271,13 @@ something in the tray menu. A few options are only reachable by editing it:
 | `vad_filter` | Voice activity detection, trims silence. Default `true` |
 | `max_no_speech` | Drop a segment above this silence probability. Default `0.6` — raise toward `1.0` if real speech is being dropped |
 | `min_avg_logprob` | Drop a segment below this confidence. Default `-1.0` — lower toward `-2.0` to keep more |
-| `compute_type` | `auto` picks `float16` on GPU, `int8` on CPU |
+| `engine` | `auto` takes this host's preferred engine. Force with `"mlx_whisper"` or `"faster_whisper"` |
+| `model_size` | A size token (`small`, `large-v3`) on either engine, or a Hugging Face repo id for mlx |
+| `compute_type` | `auto` picks `float16` on GPU, `int8` on CPU. Ignored by mlx |
+| `sounds` | Audible start / done / error cues. Default `true` |
+| `save_recordings` | Keep every clip as a WAV with its transcript beside it. Default `false` — it grows without bound |
+| `recordings_dir` | Empty → `recordings/` in the state directory |
+| `min_seconds` / `max_seconds` | Shorter is treated as a mis-tap; longer is truncated, so a stuck key cannot fill the disk |
 | `restore_clipboard` | Put your previous clipboard back after pasting. Default `true` |
 | `polish_prompt` | The instruction sent to Ollama. Must contain `{text}` |
 | `ollama_keep_alive` | How long Ollama holds the model in VRAM. Default `"30m"` — Ollama's own default of ~5 min means the first polish after a break pays a reload. Costs ~2.6 GB for a 3B model, so pair a big Whisper model with `"0"` |
@@ -234,18 +325,18 @@ film review. Delete the line if it costs more than it saves.
 ## When something breaks
 
 ```powershell
-.\run.ps1 --doctor          # full diagnostic report
-.\run.ps1 --scan-hotkeys    # which global hotkeys other apps already own
-.\run.ps1 --list-devices    # available microphones
-.\run.ps1 --config          # where the config file lives
-.\run.ps1 --model tiny --device cpu   # one-off overrides, not saved
+.\scripts\windows\run.ps1 --doctor          # full diagnostic report
+.\scripts\windows\run.ps1 --scan-hotkeys    # which global hotkeys other apps already own
+.\scripts\windows\run.ps1 --list-devices    # available microphones
+.\scripts\windows\run.ps1 --config          # where the config file lives
+.\scripts\windows\run.ps1 --model tiny --device cpu   # one-off overrides, not saved
 ```
 
 Without PowerShell, the same flags work off the env interpreter directly — the
 `.ps1` only ever forwarded them:
 
 ```
-%LOCALAPPDATA%\miniconda3\envs\sonictype\python.exe -m sonictype --doctor
+%LOCALAPPDATA%\miniconda3\envs\voice2cursor\python.exe -m voice2cursor --doctor
 ```
 
 `--doctor` checks platform, imports, CUDA, audio capture, model cache, hotkey
@@ -256,7 +347,7 @@ and refuse synthetic input from a non-elevated process. The text is still on
 your clipboard. Or switch **Output** to *Copy to clipboard only*.
 
 **Hotkey does nothing.** Another app probably owns it — run
-`.\run.ps1 --scan-hotkeys` to find out, then set `record_hotkey` to something
+`.\scripts\windows\run.ps1 --scan-hotkeys` to find out, then set `record_hotkey` to something
 reported free. On this machine `Ctrl+Alt+Space` belongs to the Claude desktop
 app, and `Ctrl+Win+Space` / `Win+Shift+Space` to Windows itself. Note too that
 an elevated app will not see keystrokes from non-elevated windows, or the
@@ -269,8 +360,8 @@ missing NVIDIA wheels, which `setup.ps1` installs.
 **"CUDA inference failed - restart with --device cpu".** A cuBLAS or cuDNN
 library loaded but could not run. Once that happens the CUDA context is
 unusable and reloading in the same process hangs rather than erroring, so
-SonicType stops using the GPU for the rest of the session instead of retrying.
-Restart it; if the message returns, run `.\run.ps1 --device cpu` and reinstall
+voice2cursor stops using the GPU for the rest of the session instead of retrying.
+Restart it; if the message returns, run `.\scripts\windows\run.ps1 --device cpu` and reinstall
 the NVIDIA wheels.
 
 **A word appeared that I never said.** Whisper invents short stock phrases when
@@ -284,22 +375,41 @@ that you have pulled a model, then use **Refresh model list**.
 ## Layout
 
 ```
-sonictype/
+voice2cursor/
   __main__.py        CLI entry, registers CUDA DLLs before any import
   app.py             tray icon, hotkey wiring, pipeline orchestration
-  config.py          dataclass + JSON persistence
-  cuda_setup.py      puts the pip NVIDIA DLLs on the loader path
+  headless.py        the same pipeline with no UI (macOS default)
+  config.py          dataclass + JSON persistence + migration from both old builds
   audio.py           microphone capture, resample to 16 kHz mono
-  transcriber.py     faster-whisper wrapper, hot model swapping
+  transcriber.py     model lifecycle, confidence filter, vocabulary
+  archive.py         WAV + transcript pairs, when save_recordings is on
+  logging_setup.py   one rotating log file, plus stdout
   ollama_client.py   polish step, degrades gracefully when Ollama is absent
   hotkeys.py         press+release global hotkeys (pynput cannot do release)
   output.py          paste / type / clipboard delivery
   review_window.py   Tk raw-vs-polished window
   icons.py           tray icons drawn at runtime
-  hotkey_scan.py     probes Win32 for hotkeys other apps already own
-  hotkey_scan.py     probes Win32 for hotkeys other apps already own
+  vocabulary.py      post-decode jargon correction
   doctor.py          diagnostics
+  cuda_setup.py      puts the pip NVIDIA DLLs on the loader path (no-op off Windows)
+  hotkey_scan.py     probes Win32 for hotkeys other apps already own
+  backends/
+    __init__.py      picks this host's backend; the only sys.platform check
+    macos.py         Cmd+V, pbcopy, afplay, flock, TCC checks
+    windows.py       Ctrl+V, pyperclip, MessageBeep, named mutex, hotkey checks
+  engines/
+    base.py          the contract: segments, optional confidence
+    mlx_whisper_engine.py      Apple Silicon GPU
+    faster_whisper_engine.py   CUDA, with the CPU fallback and wedge latch
+scripts/
+  macos/     install.sh  start.sh  stop.sh  uninstall.sh
+  windows/   setup.ps1  setup.py  setup.vbs  run.ps1  run-silent.vbs
+             install-autostart.ps1  install-autostart.vbs
 ```
 
-Model weights live in `~/.cache/huggingface`, config in
-`%APPDATA%\SonicType` — neither is in the repo.
+Adding a platform means one module under `backends/`, one line in
+`backends/__init__.py`, and a script pair. Adding an engine means one module
+under `engines/` and one line in its `__init__.py`.
+
+Model weights live in `~/.cache/huggingface`; config and logs live in the state
+directory. Neither is in the repo.

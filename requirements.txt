@@ -1,4 +1,31 @@
-mlx-whisper
-sounddevice
-pynput
-numpy
+# One file for both hosts; the markers do the splitting, so `pip install -r`
+# is the same command on either.
+#
+# Shared: capture, resampling, the global hotkey listener, the Ollama client.
+sounddevice>=0.5.6
+numpy>=2.5.2
+scipy>=1.18.1
+pynput>=1.8.2
+requests>=2.34.2
+
+# Transcription. The engines are not interchangeable on a given host:
+# mlx-whisper uses the Apple Silicon GPU, faster-whisper uses CUDA, and each
+# falls back to a slow CPU path on the other's machine. See engines/.
+mlx-whisper>=0.4.3; sys_platform == 'darwin'
+faster-whisper>=1.2.1; sys_platform == 'win32'
+ctranslate2>=4.8.1; sys_platform == 'win32'
+av>=18.1.0; sys_platform == 'win32'
+onnxruntime>=1.29.0; sys_platform == 'win32'
+
+# The CUDA runtime CTranslate2 links against. Pip-side rather than conda-side
+# so the versions match what the ctranslate2 wheel was built for.
+nvidia-cublas-cu12>=12.9.2; sys_platform == 'win32'
+nvidia-cudnn-cu12>=9.24.0; sys_platform == 'win32'
+nvidia-cuda-nvrtc-cu12>=12.9.86; sys_platform == 'win32'
+
+# Tray UI. Windows only: macOS runs headless under launchd, where a menu-bar
+# item would need an .app bundle and a session to draw in. `--tray` on a Mac
+# works if you install these yourself.
+pyperclip>=1.11.0; sys_platform == 'win32'
+pystray>=0.19.5; sys_platform == 'win32'
+pillow>=12.3.0; sys_platform == 'win32'

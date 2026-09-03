@@ -1,4 +1,8 @@
-# Reproducible env for SonicType.
+# Reproducible conda env for voice2cursor on Windows.
+#
+# macOS installs into a venv from requirements.txt instead (see
+# scripts/macos/install.sh); the two hosts do not share an engine, so
+# there is nothing useful for one env file to say about both.
 #
 # ffmpeg is deliberately absent: audio is captured as raw PCM in-process and
 # handed to faster-whisper as a numpy array, so no decoder binary is involved.
@@ -6,7 +10,7 @@
 # The nvidia-* wheels are the CUDA runtime CTranslate2 links against. They stay
 # pip-side rather than conda-side so the versions match what the ctranslate2
 # wheel was built for.
-name: sonictype
+name: voice2cursor
 
 channels:
   - conda-forge
@@ -21,7 +25,7 @@ dependencies:
       - ctranslate2>=4.8.1
       - av>=18.1.0
       - onnxruntime>=1.29.0
-      # CUDA runtime for ctranslate2 (see sonictype/cuda_setup.py)
+      # CUDA runtime for ctranslate2 (see voice2cursor/cuda_setup.py)
       - nvidia-cublas-cu12>=12.9.2
       - nvidia-cudnn-cu12>=9.24.0
       - nvidia-cuda-nvrtc-cu12>=12.9.86
