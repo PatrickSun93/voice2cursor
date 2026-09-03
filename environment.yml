@@ -1,0 +1,38 @@
+# Reproducible env for SonicType.
+#
+# ffmpeg is deliberately absent: audio is captured as raw PCM in-process and
+# handed to faster-whisper as a numpy array, so no decoder binary is involved.
+#
+# The nvidia-* wheels are the CUDA runtime CTranslate2 links against. They stay
+# pip-side rather than conda-side so the versions match what the ctranslate2
+# wheel was built for.
+name: sonictype
+
+channels:
+  - conda-forge
+  - nodefaults
+
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      # transcription
+      - faster-whisper>=1.2.1
+      - ctranslate2>=4.8.1
+      - av>=18.1.0
+      - onnxruntime>=1.29.0
+      # CUDA runtime for ctranslate2 (see sonictype/cuda_setup.py)
+      - nvidia-cublas-cu12>=12.9.2
+      - nvidia-cudnn-cu12>=9.24.0
+      - nvidia-cuda-nvrtc-cu12>=12.9.86
+      # capture / numerics
+      - sounddevice>=0.5.6
+      - numpy>=2.5.2
+      - scipy>=1.18.1
+      # desktop integration
+      - pynput>=1.8.2
+      - pyperclip>=1.11.0
+      - pystray>=0.19.5
+      - pillow>=12.3.0
+      # Ollama HTTP client
+      - requests>=2.34.2
