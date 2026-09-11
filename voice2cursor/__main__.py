@@ -47,8 +47,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ui = p.add_mutually_exclusive_group()
     ui.add_argument("--tray", dest="ui", action="store_const", const="tray",
                     help="run with a tray icon (default on Windows)")
+    ui.add_argument("--menubar", dest="ui", action="store_const", const="menubar",
+                    help="run with a menu-bar icon (default on macOS)")
     ui.add_argument("--headless", dest="ui", action="store_const", const="headless",
-                    help="no tray, log to a file (default on macOS)")
+                    help="no icon, log to a file")
     p.set_defaults(ui=None)
     p.add_argument("--allow-multiple", action="store_true",
                    help="skip the single-instance check")
@@ -115,6 +117,11 @@ def main(argv: list[str] | None = None) -> int:
     from .headless import Headless
 
     runner = Headless(cfg)
+    if ui == "menubar":
+        from .menubar import run_menubar
+
+        return run_menubar(runner)
+
     # SIGTERM is what launchd and a plain `kill` send; without this the agent
     # dies mid-transcription instead of finishing and closing the stream.
     for name in ("SIGTERM", "SIGINT", "SIGBREAK"):

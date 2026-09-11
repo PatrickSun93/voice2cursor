@@ -41,6 +41,10 @@ def _default_hotkey() -> str:
     return backends.DEFAULT_RECORD_HOTKEY
 
 
+def _default_keep_mic_open() -> bool:
+    return backends.DEFAULT_KEEP_MIC_OPEN
+
+
 @dataclass
 class Config:
     # --- engine ---
@@ -62,9 +66,10 @@ class Config:
     # Whisper invents words when fed near-silence - a stray "Mahala" or "Thank
     # you." pasting into your editor is worse than nothing. Segments are dropped
     # when the model is this unsure. Raise max_no_speech toward 1.0, or lower
-    # min_avg_logprob toward -2.0, if real speech is being discarded.
-    max_no_speech: float = 0.6    # drop segment if no_speech_prob exceeds this
-    min_avg_logprob: float = -1.0  # drop segment if avg_logprob falls below this
+    # min_avg_logprob toward -2.0, if real speech is being discarded; None turns
+    # that check off.
+    max_no_speech: float | None = 0.6     # drop segment if no_speech_prob exceeds this
+    min_avg_logprob: float | None = -1.0  # drop segment if avg_logprob falls below this
 
     # --- vocabulary ---
     # Site jargon Whisper cannot know: panel names, daemon identifiers, brand
@@ -80,6 +85,10 @@ class Config:
     # it in testing - so a saved index silently starts pointing at a different
     # microphone. None means the system default.
     input_device: str | None = None
+    # Hold the stream open between clips: pre-roll, and no per-clip open delay.
+    # Off by default on macOS, where an open Bluetooth mic drags the headset's
+    # playback down to telephone quality. See audio.py.
+    keep_mic_open: bool = field(default_factory=_default_keep_mic_open)
     min_seconds: float = 0.35     # shorter clips are a mis-press, not speech
     max_seconds: float = 300.0    # a stuck key should not fill the disk
 
@@ -187,6 +196,13 @@ def _from_legacy_mac(raw: dict) -> dict:
     # on push-to-talk-length clips.
     out.pop("condition_on_previous_text", None)
     out.pop("preload_model", None)
+
+    # The script never dropped segments, and switching the confidence filter on
+    # underneath it is not safe: replaying one user's archive through
+    # mlx-whisper, Mandarin that was spoken and transcribed correctly scored an
+    # avg_logprob of -2.7 to -4.2, far below the -1.0 default. Opt in by hand.
+    out.setdefault("max_no_speech", None)
+    out.setdefault("min_avg_logprob", None)
     return out
 
 

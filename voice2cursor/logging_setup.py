@@ -15,6 +15,8 @@ import sys
 
 from .config import LOG_DIR
 
+LOG_PATH = os.path.join(LOG_DIR, "voice2cursor.log")
+
 _configured = False
 
 
@@ -31,8 +33,7 @@ def get_logger(name: str = "voice2cursor") -> logging.Logger:
     try:
         os.makedirs(LOG_DIR, exist_ok=True)
         handler = logging.handlers.RotatingFileHandler(
-            os.path.join(LOG_DIR, "voice2cursor.log"),
-            maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+            LOG_PATH, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
         handler.setFormatter(fmt)
         log.addHandler(handler)
     except OSError:

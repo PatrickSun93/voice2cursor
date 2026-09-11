@@ -8,8 +8,9 @@ file in the package branches on the platform. A backend supplies:
     LEGACY_STATE_DIRS     older locations to migrate a config out of
     PASTE_MODIFIER        "cmd" or "ctrl" -- the modifier that means paste
     DEFAULT_ENGINE        transcription engine to prefer on this host
-    DEFAULT_UI            "tray" or "headless" -- how this host normally runs
+    DEFAULT_UI            "tray", "menubar" or "headless" -- how this host normally runs
     DEFAULT_RECORD_HOTKEY a chord that is actually free on this host
+    DEFAULT_KEEP_MIC_OPEN hold the mic stream open between clips (see audio.py)
     UI_FONT / MONO_FONT   Tk font families that exist here
     open_folder(path)     reveal a directory in the file manager
     open_text_file(path)  open a file in the default text editor
@@ -54,6 +55,7 @@ PASTE_MODIFIER: str = backend.PASTE_MODIFIER
 DEFAULT_ENGINE: str = backend.DEFAULT_ENGINE
 DEFAULT_RECORD_HOTKEY: str = backend.DEFAULT_RECORD_HOTKEY
 DEFAULT_UI: str = backend.DEFAULT_UI
+DEFAULT_KEEP_MIC_OPEN: bool = backend.DEFAULT_KEEP_MIC_OPEN
 UI_FONT: tuple = backend.UI_FONT
 MONO_FONT: tuple = backend.MONO_FONT
 
@@ -67,8 +69,8 @@ doctor_checks = backend.doctor_checks
 
 __all__ = [
     "NAME", "STATE_DIR", "LEGACY_STATE_DIRS", "PASTE_MODIFIER", "DEFAULT_ENGINE",
-    "DEFAULT_RECORD_HOTKEY", "DEFAULT_UI", "UI_FONT", "MONO_FONT", "open_folder",
-    "open_text_file", "play_sound", "clipboard_get", "clipboard_set",
-    "single_instance_lock", "doctor_checks",
+    "DEFAULT_RECORD_HOTKEY", "DEFAULT_UI", "DEFAULT_KEEP_MIC_OPEN", "UI_FONT",
+    "MONO_FONT", "open_folder", "open_text_file", "play_sound", "clipboard_get",
+    "clipboard_set", "single_instance_lock", "doctor_checks",
     "UnsupportedPlatform", "backend",
 ]
