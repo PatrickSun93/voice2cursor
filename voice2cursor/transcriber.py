@@ -90,13 +90,17 @@ class Transcriber:
 
         A None means the engine does not report that signal, which is not the
         same as reporting a bad score -- treat it as keep. Discarding real
-        speech is the worse of the two failures.
+        speech is the worse of the two failures. A None threshold in the
+        config turns that check off.
         """
+        max_no_speech, min_logprob = self.cfg.max_no_speech, self.cfg.min_avg_logprob
         kept = []
         for seg in segments:
-            if seg.no_speech_prob is not None and seg.no_speech_prob > self.cfg.max_no_speech:
+            if (max_no_speech is not None and seg.no_speech_prob is not None
+                    and seg.no_speech_prob > max_no_speech):
                 continue
-            if seg.avg_logprob is not None and seg.avg_logprob < self.cfg.min_avg_logprob:
+            if (min_logprob is not None and seg.avg_logprob is not None
+                    and seg.avg_logprob < min_logprob):
                 continue
             kept.append(seg.text)
         return "".join(kept).strip()

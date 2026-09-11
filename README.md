@@ -25,7 +25,7 @@ what platform it is on.
 | default hotkey | right Option (`alt_r`) | `ctrl+alt+space` |
 | paste | Cmd+V | Ctrl+V |
 | clipboard | `pbcopy` / `pbpaste` | pyperclip |
-| runs as | headless launchd agent | tray icon |
+| runs as | menu-bar icon, from a launchd agent | tray icon |
 | state | `~/.voice2cursor` | `%APPDATA%\voice2cursor` |
 | autostart | LaunchAgent (`scripts/macos/install.sh`) | Startup shortcut (`scripts/windows/install-autostart.ps1`) |
 | setup | `scripts/macos/install.sh` | `scripts/windows/setup.ps1` |
@@ -41,13 +41,21 @@ text. That split is why there are two model settings in the tray menu.
 `sounddevice` and handed to faster-whisper as a numpy array, so there is no
 temp file and no ffmpeg install to go wrong.
 
-**The microphone stream stays open.** Opening an `InputStream` on demand was
-measured at 0.02 s on a USB mic array but **0.93 s on a Bluetooth headset** —
-which silently ate the first word of every clip. So the stream is held open and
-audio flows into a ring buffer; the hotkey just marks where to start reading.
-That also buys a 0.25 s pre-roll, so speaking a fraction early still works.
-While idle the buffer holds only the pre-roll, about 15 KB. The cost is that
-Windows shows the microphone-in-use indicator whenever voice2cursor is running.
+**The microphone stream stays open on Windows.** Opening an `InputStream` on
+demand was measured at 0.02 s on a USB mic array but **0.93 s on a Bluetooth
+headset** — which silently ate the first word of every clip. So the stream is
+held open and audio flows into a ring buffer; the hotkey just marks where to
+start reading. That also buys a 0.25 s pre-roll, so speaking a fraction early
+still works. While idle the buffer holds only the pre-roll, about 15 KB. The
+cost is that Windows shows the microphone-in-use indicator whenever
+voice2cursor is running.
+
+**On macOS it opens per clip.** There an open Bluetooth microphone pins the
+headset to its hands-free profile, so everything you listen to through it plays
+at telephone quality for as long as voice2cursor runs, not just while you
+dictate. The stream opens on the keypress and closes on release instead, with
+no pre-roll. `keep_mic_open` in the config overrides the default on either
+host — worth turning on for a wired or USB mic.
 
 **Two engines, not one.** mlx-whisper runs on the Apple Silicon GPU and
 faster-whisper on CUDA. Each one falls back to a slow CPU path on the other's
@@ -62,12 +70,14 @@ away the stock phrases Whisper invents from near-silence ("Thank you.",
 "Mahala"). An engine that reports neither returns `None`, which means *unknown*
 and is treated as keep — discarding real speech is the worse failure.
 
-**Tray on Windows, headless on macOS.** These are different program shapes, not
-one with a flag: pystray wants its own loop and Tk wants the main thread, while
-a launchd agent has no session to draw a menu-bar item in and would need an
-`.app` bundle to try. Both drive the same recorder, transcriber and delivery
-path; only the shell around them differs. `--tray` and `--headless` override
-the default on either host.
+**Tray on Windows, menu bar on macOS.** These are different program shapes,
+not one with a flag: pystray wants its own loop and Tk wants the main thread,
+and on a Mac pystray wants the main thread too, so the two cannot share a
+process there. The macOS menu-bar item is drawn with AppKit directly instead
+(`menubar.py`), wrapped around the same pipeline `--headless` runs. It needs no
+`.app` bundle: a LaunchAgent runs inside the user's GUI session, so the launchd
+agent can show one. `--tray` and `--headless` override the default on either
+host; `--menubar` is macOS only.
 
 **The CUDA DLLs need help.** CTranslate2 links cuBLAS and cuDNN dynamically,
 and the pip wheels put them somewhere Windows does not search. `cuda_setup.py`
@@ -132,13 +142,14 @@ interpreter and runs `setup.py` — the same work, no PowerShell involved.
 
 ## Running
 
-Naming no options picks this host's usual shape — headless on macOS, tray on
-Windows — and either can be forced:
+Naming no options picks this host's usual shape — a menu-bar icon on macOS, a
+tray icon on Windows — and any of them can be forced:
 
 ```
 python -m voice2cursor              # this host's default
-python -m voice2cursor --headless   # no tray, logs to a file
+python -m voice2cursor --menubar    # menu-bar icon (macOS)
 python -m voice2cursor --tray       # tray icon (needs pystray + pillow)
+python -m voice2cursor --headless   # no icon, logs to a file
 python -m voice2cursor --doctor     # diagnostics, then exit
 python -m voice2cursor --config     # print the config path
 python -m voice2cursor --list-devices
@@ -154,8 +165,27 @@ autostarted one. `--allow-multiple` overrides it.
 ./scripts/macos/start.sh    # load the launchd agent
 ./scripts/macos/stop.sh     # unload it
 tail -f ~/.voice2cursor/logs/voice2cursor.log
-./.venv/bin/python3 -m voice2cursor --headless   # or in the foreground
+./.venv/bin/python3 -m voice2cursor   # or in the foreground
 ```
+
+A microphone appears in the menu bar. Its shape is the status, and hovering
+over it says the same in words:
+
+| Icon | Meaning |
+| --- | --- |
+| Hourglass | Loading the model, for a few seconds after start |
+| Microphone | Idle, ready |
+| Red filled microphone | Recording |
+| Waveform | Transcribing |
+| Crossed-out microphone | Paused — the hotkey is ignored |
+| Warning triangle | The last recording, transcription or paste failed; clears on the next success |
+
+The menu shows the last transcript and up to ten recent ones (click one to copy
+it again), pauses dictation, and switches sounds, clipboard restore, the
+recording archive, Ollama polish, output mode, language and the record hotkey.
+Changes apply at once and are saved to the config. **Quit** is a clean exit,
+which the LaunchAgent does not relaunch — `start.sh` or the next login brings
+it back.
 
 ### Windows
 
@@ -222,7 +252,7 @@ an app using a low-level keyboard hook stays invisible — "free" is a strong
 hint, not a guarantee. Set `record_hotkey` in the config, then use **Reload
 config file** in the tray menu.
 
-## Tray menu
+## Tray menu (Windows)
 
 - **Whisper model** — `tiny` · `base` · `small` · `medium` · `large-v3` ·
   `distil-large-v3`. Downloads on first use into `~/.cache/huggingface` and
@@ -251,13 +281,17 @@ Buttons polish, copy either side, or paste the polished text at your cursor.
 
 Settings live in the state directory — `~/.voice2cursor/config.json` on macOS,
 `%APPDATA%\voice2cursor\config.json` on Windows — written whenever you change
-something in the tray menu.
+something in the tray or menu-bar menu.
 
 Settings from either pre-merge build are migrated the first time you run this
 one: the Windows package's `%APPDATA%\SonicType\config.json` is copied across
 with its vocabulary file, and the macOS script's `config.json` is translated
 key by key (`hotkey` → `record_hotkey`, `auto_paste: false` → `output_mode:
-"clipboard"`, the nested `ollama` block flattened). Nothing is deleted.
+"clipboard"`, the nested `ollama` block flattened). Nothing is deleted. The
+macOS script never filtered segments, so a migrated macOS config keeps
+`max_no_speech` and `min_avg_logprob` at `null` (off): replaying one user's
+recordings through mlx-whisper, Mandarin that was spoken and transcribed
+correctly scored an `avg_logprob` of -2.7 to -4.2 and would have been dropped.
 
 A few options are only reachable by editing the file:
 
@@ -269,8 +303,9 @@ A few options are only reachable by editing the file:
 | `vocabulary_path` | Empty → `vocabulary.json` next to `config.json` |
 | `beam_size` | Default `5`. Lower is faster, higher is marginally more accurate |
 | `vad_filter` | Voice activity detection, trims silence. Default `true` |
-| `max_no_speech` | Drop a segment above this silence probability. Default `0.6` — raise toward `1.0` if real speech is being dropped |
-| `min_avg_logprob` | Drop a segment below this confidence. Default `-1.0` — lower toward `-2.0` to keep more |
+| `max_no_speech` | Drop a segment above this silence probability. Default `0.6` — raise toward `1.0` if real speech is being dropped, or `null` to turn it off |
+| `min_avg_logprob` | Drop a segment below this confidence. Default `-1.0` — lower toward `-2.0` to keep more, or `null` to turn it off. Non-English speech can score far lower |
+| `keep_mic_open` | Hold the microphone open between clips, for a 0.25 s pre-roll and no per-clip open delay. Default `true` on Windows, `false` on macOS, where it would keep a Bluetooth headset in its low-quality hands-free profile |
 | `engine` | `auto` takes this host's preferred engine. Force with `"mlx_whisper"` or `"faster_whisper"` |
 | `model_size` | A size token (`small`, `large-v3`) on either engine, or a Hugging Face repo id for mlx |
 | `compute_type` | `auto` picks `float16` on GPU, `int8` on CPU. Ignored by mlx |
@@ -368,6 +403,10 @@ the NVIDIA wheels.
 fed near-silence. Segments are dropped when the model is unsure — tune
 `max_no_speech` and `min_avg_logprob` if it is either too eager or too strict.
 
+**Words I did say went missing.** The same filter, too strict for your speech.
+Lower `min_avg_logprob`, or set both thresholds to `null`. Mandarin in
+particular scores well below the `-1.0` default.
+
 **Polish does nothing.** Transcription is unaffected by Ollama being down — by
 design, the raw text still gets pasted. Confirm `ollama serve` is running and
 that you have pulled a model, then use **Refresh model list**.
@@ -377,8 +416,9 @@ that you have pulled a model, then use **Refresh model list**.
 ```
 voice2cursor/
   __main__.py        CLI entry, registers CUDA DLLs before any import
-  app.py             tray icon, hotkey wiring, pipeline orchestration
-  headless.py        the same pipeline with no UI (macOS default)
+  app.py             tray icon, hotkey wiring, pipeline orchestration (Windows default)
+  headless.py        the pipeline with no UI of its own (--headless)
+  menubar.py         AppKit menu-bar icon around that pipeline (macOS default)
   config.py          dataclass + JSON persistence + migration from both old builds
   audio.py           microphone capture, resample to 16 kHz mono
   transcriber.py     model lifecycle, confidence filter, vocabulary

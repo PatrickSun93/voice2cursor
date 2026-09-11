@@ -23,9 +23,12 @@ nvidia-cublas-cu12>=12.9.2; sys_platform == 'win32'
 nvidia-cudnn-cu12>=9.24.0; sys_platform == 'win32'
 nvidia-cuda-nvrtc-cu12>=12.9.86; sys_platform == 'win32'
 
-# Tray UI. Windows only: macOS runs headless under launchd, where a menu-bar
-# item would need an .app bundle and a session to draw in. `--tray` on a Mac
-# works if you install these yourself.
+# Menu-bar icon, the macOS default: AppKit through PyObjC, which pynput already
+# pulls in on a Mac. Listed so the dependency is explicit. See menubar.py.
+pyobjc-framework-Cocoa>=12.2; sys_platform == 'darwin'
+
+# Tray UI, the Windows default. `--tray` on a Mac works if you install these
+# yourself.
 pyperclip>=1.11.0; sys_platform == 'win32'
 pystray>=0.19.5; sys_platform == 'win32'
 pillow>=12.3.0; sys_platform == 'win32'

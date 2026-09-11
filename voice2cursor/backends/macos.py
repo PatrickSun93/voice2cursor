@@ -28,10 +28,15 @@ DEFAULT_ENGINE = "mlx_whisper"
 # betting on, and a lone modifier is the gesture push-to-talk actually wants.
 DEFAULT_RECORD_HOTKEY = "alt_r"
 
-# A menu-bar item wants a real .app bundle, and the launchd agent has no
-# session to draw one in, so the daemon runs headless. --tray still works from
-# a terminal if pystray is installed.
-DEFAULT_UI = "headless"
+# A menu-bar item drawn straight through AppKit (menubar.py). No .app bundle is
+# needed: a LaunchAgent runs inside the user's GUI session and can show one.
+# --headless still works, and --tray from a terminal if pystray is installed.
+DEFAULT_UI = "menubar"
+
+# An open Bluetooth microphone pins the headset to its hands-free profile, so
+# everything played through it drops to telephone quality for as long as the
+# stream is up. Open the mic per clip instead, giving up the pre-roll.
+DEFAULT_KEEP_MIC_OPEN = False
 
 UI_FONT = ("SF Pro Text", 13)
 MONO_FONT = ("SF Mono", 12)

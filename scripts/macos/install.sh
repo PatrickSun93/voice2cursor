@@ -40,11 +40,12 @@ cat > "$HOME/.voice2cursor/run.sh" <<WRAP
 #!/bin/bash
 # launchd 入口。plist 不能含 /Volumes 路径，真正的程序路径藏在这里。
 cd "$APP_DIR"
-exec "$APP_DIR/.venv/bin/python3" -m voice2cursor --headless
+exec "$APP_DIR/.venv/bin/python3" -m voice2cursor
 WRAP
 chmod +x "$HOME/.voice2cursor/run.sh"
 
 PLIST="$HOME/Library/LaunchAgents/com.voice2cursor.plist"
+# KeepAlive 只在异常退出时拉起：菜单栏 Quit 是正常退出(0)，不能被拉回来
 cat > "$PLIST" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -57,7 +58,7 @@ cat > "$PLIST" <<PL
     <string>$HOME/.voice2cursor/run.sh</string>
   </array>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>StandardOutPath</key><string>$HOME/.voice2cursor/logs/launchd.out.log</string>
   <key>StandardErrorPath</key><string>$HOME/.voice2cursor/logs/launchd.err.log</string>
 </dict>
@@ -71,8 +72,8 @@ echo "     两处都点 + 添加这个文件（cmd+shift+G 粘贴路径）："
 echo "       $APP_DIR/.venv/bin/python3"
 echo ""
 echo "  B. 然后启动常驻服务： ./scripts/macos/start.sh"
-echo "     第一次按住热键录音时会弹【麦克风】授权，点允许。"
+echo "     右上角菜单栏会出现麦克风图标；第一次按住热键录音时会弹【麦克风】授权，点允许。"
 echo ""
 echo "  配置在 ~/.voice2cursor/config.json（首次运行会从旧配置迁移过来）"
-echo "  调试模式（前台跑，日志直出）： ./.venv/bin/python3 -m voice2cursor --headless"
+echo "  调试模式（前台跑，日志直出）： ./.venv/bin/python3 -m voice2cursor（加 --headless 不显示图标）"
 echo "  自检： ./.venv/bin/python3 -m voice2cursor --doctor"

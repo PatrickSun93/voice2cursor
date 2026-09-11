@@ -33,6 +33,11 @@ DEFAULT_RECORD_HOTKEY = "ctrl+shift+space"
 # from the Startup folder, everything reachable from the menu.
 DEFAULT_UI = "tray"
 
+# Opening a stream per clip took 0.93 s on a Bluetooth headset here and ate the
+# first word, so the stream stays open over a ring buffer (see audio.py). The
+# cost is the microphone-in-use indicator whenever voice2cursor is running.
+DEFAULT_KEEP_MIC_OPEN = True
+
 UI_FONT = ("Segoe UI", 10)
 MONO_FONT = ("Consolas", 10)
 

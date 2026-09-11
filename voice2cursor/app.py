@@ -69,7 +69,7 @@ class App:
         self.cfg = cfg
         self.transcriber = Transcriber(cfg)
         self.ollama = OllamaClient(cfg)
-        self.recorder = audio.Recorder(cfg.input_device)
+        self.recorder = audio.Recorder(cfg.input_device, keep_open=cfg.keep_mic_open)
         self.hotkeys = HotkeyManager()
 
         self.state = "idle"  # idle | recording | transcribing | polishing | error
@@ -187,7 +187,7 @@ class App:
         try:
             self.recorder.close()
             self.recorder.device = self.cfg.input_device
-            self.recorder.open()
+            self.recorder.reset()
         except Exception as exc:
             print(f"[voice2cursor] stream reopen failed: {exc}")
 
@@ -413,6 +413,7 @@ class App:
         self.transcriber.cfg = fresh
         self.ollama.cfg = fresh
         self.recorder.device = fresh.input_device
+        self.recorder.keep_open = fresh.keep_mic_open
         self._rebind_hotkeys()
         self._rebuild_menu()
         self._notify("Config reloaded")
@@ -609,11 +610,12 @@ class App:
     def _startup_worker(self) -> None:
         # Open the mic stream up front: on Bluetooth devices the first stream
         # takes most of a second to deliver data, which would otherwise eat the
-        # start of the very first clip.
-        try:
-            self.recorder.open()
-        except Exception as exc:
-            self._notify(f"Microphone unavailable: {exc}")
+        # start of the very first clip. Skipped when it is opened per clip.
+        if self.recorder.keep_open:
+            try:
+                self.recorder.open()
+            except Exception as exc:
+                self._notify(f"Microphone unavailable: {exc}")
 
         self._set_state("busy", f"loading {self.cfg.model_size}...")
         try:

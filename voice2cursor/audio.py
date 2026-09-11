@@ -7,6 +7,12 @@ Bluetooth headset - long enough to swallow the first word of every clip. A ring
 buffer also gives us a short pre-roll, so audio from just *before* the keypress
 survives for users who start talking as they press.
 
+That is `keep_open`, the Windows default. macOS defaults the other way: an open
+Bluetooth microphone pins the headset to its hands-free profile, so everything
+the user listens to plays at telephone quality for as long as the stream is
+up. There the stream opens on the keypress and closes on release, and there is
+no pre-roll.
+
 Recording at the device's native rate and resampling to the 16 kHz mono float32
 Whisper wants means faster-whisper can be handed a numpy array directly, so
 there is no temp file and no ffmpeg dependency.
@@ -30,19 +36,21 @@ MAX_SECONDS = 600.0
 
 
 class Recorder:
-    """Continuous capture with mark/collect semantics.
+    """Capture with mark/collect semantics.
 
-    `open()` starts the stream and it stays running. `start()` marks the point
-    to collect from; `stop()` returns everything since that mark, resampled to
-    16 kHz mono. While idle only the pre-roll is retained, so an open stream
-    costs a few kilobytes rather than growing without bound.
+    `open()` starts the stream. `start()` marks the point to collect from;
+    `stop()` returns everything since that mark, resampled to 16 kHz mono.
+    With `keep_open` the stream then keeps running, and while idle only the
+    pre-roll is retained, so it costs a few kilobytes rather than growing
+    without bound. Without it, `start()` opens the stream and `stop()` closes it.
     """
 
-    def __init__(self, device: str | None = None):
+    def __init__(self, device: str | None = None, keep_open: bool = True):
         self._device = device          # device NAME, or None for system default
         self._resolved: int | None = None  # index, recomputed on every open()
         self._stream: sd.InputStream | None = None
         self._rate = TARGET_RATE
+        self.keep_open = keep_open
 
         self._lock = threading.Lock()
         self._blocks: deque[np.ndarray] = deque()
@@ -81,9 +89,21 @@ class Recorder:
         return self._mark is not None
 
     def open(self) -> None:
-        """Start the persistent stream. Safe to call when already open."""
+        """Start the stream. Safe to call when already open."""
         if self._stream is not None:
             return
+        try:
+            self._open_stream()
+        except sd.PortAudioError:
+            # PortAudio enumerates devices once, when it initialises. After a
+            # Bluetooth headset connects or drops, or the Mac wakes from sleep,
+            # that list is stale and every open fails (-9986) until PortAudio is
+            # re-initialised, which also refreshes what resolve_input_device sees.
+            sd._terminate()
+            sd._initialize()
+            self._open_stream()
+
+    def _open_stream(self) -> None:
         self._resolved = resolve_input_device(self._device)
         self._rate = self._pick_rate()
         with self._lock:
@@ -112,6 +132,13 @@ class Recorder:
             self._blocks.clear()
             self._buffered = self._dropped = 0
             self._mark = None
+
+    def reset(self) -> None:
+        """Drop the stream after the device misbehaved. Reopened here only when
+        it is meant to stay open; otherwise the next start() opens a fresh one."""
+        self.close()
+        if self.keep_open:
+            self.open()
 
     def _pick_rate(self) -> int:
         """Prefer 16 kHz so no resampling is needed; fall back to the device default."""
@@ -155,7 +182,18 @@ class Recorder:
             self._mark = max(self._dropped, total - preroll)
 
     def stop(self) -> np.ndarray:
-        """Return audio since `start()` as 16 kHz mono float32 (empty if none)."""
+        """Return audio since `start()` as 16 kHz mono float32 (empty if none).
+
+        Without `keep_open` this also closes the stream -- after collecting,
+        because close() discards the buffer.
+        """
+        try:
+            return self._collect()
+        finally:
+            if not self.keep_open:
+                self.close()
+
+    def _collect(self) -> np.ndarray:
         with self._lock:
             mark, self._mark = self._mark, None
             if mark is None or not self._blocks:
@@ -183,6 +221,9 @@ class Recorder:
 
     def cancel(self) -> None:
         """Discard the in-progress clip without returning it."""
+        if not self.keep_open:
+            self.close()
+            return
         with self._lock:
             self._mark = None
             self._trim_locked()
